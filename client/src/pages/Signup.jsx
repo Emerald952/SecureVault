@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
+import {
+  generateSalt,
+  saltToBase64,
+  deriveKeys,
+}from '../utils/encryption';
+
 function Signup() {
   // useState creates variables that cause the page to re-render when they change
   const [name, setName] = useState('');
@@ -19,11 +25,22 @@ function Signup() {
     setSuccess('');
 
     try {
-      // Send the signup data to our Express backend
+      //Generate a unique random salt for this account
+      const salt = generateSalt();
+
+      //Derive the encryption key and authentication token
+      const keys = await deriveKeys(password, salt);
+
+      //Send only the salt and authentication token to the backend
       const response = await fetch('http://localhost:5000/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ 
+          name, 
+          email, 
+          vaultSalt: saltToBase64(salt), 
+          authToken: keys.authToken,
+        }),
       });
 
       const data = await response.json();
@@ -37,6 +54,7 @@ function Signup() {
       setSuccess('Account created! Redirecting to login...');
       setTimeout(() => navigate('/login'), 1500);
     } catch (err) {
+      console.error('Signup error:', err);
       setError('Cannot connect to server. Is the backend running?');
     }
   };
@@ -80,7 +98,7 @@ function Signup() {
                 </div>
 
                 <div className="mb-3">
-                  <label className="form-label">Password</label>
+                  <label className="form-label">master Password</label>
                   <input
                     type="password"
                     className="form-control"
@@ -90,6 +108,10 @@ function Signup() {
                     required
                     minLength="6"
                   />
+                  <small className="text-muted">
+                    This password derives your encryption key. If you forget
+                    it, your encrypted notes cannot be recovered.
+                  </small>
                 </div>
 
                 <button type="submit" className="btn btn-primary w-100">

@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { encryptData, decryptData} from '../utils/encryption';
+import { useVault } from '../context/VaultContext';
+
 function Dashboard() {
   const [notes, setNotes] = useState([]);        // Array of user's notes
   const [title, setTitle] = useState('');          // New/edit note title
   const [content, setContent] = useState('');      // New/edit note content
   const [editingId, setEditingId] = useState(null); // Which note is being edited (null = creating new)
   const [error, setError] = useState('');
+  
+  const { encryptionKey, setEncryptionKey } = useVault();
 
   const navigate = useNavigate();
 
@@ -36,14 +41,43 @@ function Dashboard() {
   const fetchNotes = async () => {
     try {
       const response = await apiCall('/api/notes');
+      
       if (response.status === 401) {
         // Token expired or invalid -> log out
         handleLogout();
         return;
       }
-      const data = await response.json();
-      setNotes(data);
+
+      if(!response.ok){
+        throw new Error('Failed to fetch notes');
+      }
+
+      const encryptedNotes = await response.json();
+
+      //Decrypt every note in the browser
+      const decryptedNotes = await Promise.all(
+        encryptedNotes.map(async(note) => {
+          const decryptedData = await decryptData(
+            {
+              ciphertext: note.encrypted_data,
+              iv: note.iv,
+            },
+            encryptionKey
+          );
+
+          const noteData = JSON.parse(decryptedData);
+
+          return {
+            ...note,
+            title: noteData.title,
+            content: noteData.content,
+          };
+        })
+      );
+
+      setNotes(decryptedNotes);
     } catch (err) {
+      console.error('Fetch notes error:', err);
       setError('Failed to load notes. Is the server running?');
     }
   };
@@ -54,26 +88,50 @@ function Dashboard() {
     setError('');
 
     try {
+      //Combine title and content into one JSON string
+      const noteData = JSON.stringify({
+        title,
+        content,
+      });
+
+      //Encrypt the JSON string in the browser | generate random 12-Byte iv, encrypt using AES-256-GCM, returns ciphertext and iv both base64 enc
+      const encrypted = await encryptData(noteData, encryptionKey);
+
+      const requestBody = {
+        encrypted_data: encrypted.ciphertext,
+        iv: encrypted.iv,
+      };
+
       if (editingId) {
         // UPDATE existing note
-        await apiCall(`/api/notes/${editingId}`, {
+        const response = await apiCall(`/api/notes/${editingId}`, {
           method: 'PUT',
-          body: JSON.stringify({ title, content }),
+          body: JSON.stringify(requestBody),
         });
+
+        if(!response.ok){
+          throw new Error('Failed to update notes');
+        }
       } else {
         // CREATE new note
-        await apiCall('/api/notes', {
+        const response = await apiCall('/api/notes', {
           method: 'POST',
-          body: JSON.stringify({ title, content }),
+          body: JSON.stringify(requestBody),
         });
+
+        if(!response.ok){
+          throw new Error('Failed to create notes');
+        }
       }
 
       // Clear the form and refresh the notes list
       setTitle('');
       setContent('');
       setEditingId(null);
-      fetchNotes();
+
+      await fetchNotes();
     } catch (err) {
+      console.error('Save note error:', err);
       setError('Failed to save note.');
     }
   };
@@ -108,8 +166,13 @@ function Dashboard() {
 
   // Logout: clear localStorage and go to login page
   const handleLogout = () => {
+    // Remove authentication details
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+
+    // Clear the encryption key from memory
+    setEncryptionKey(null);
+
     navigate('/login');
   };
 

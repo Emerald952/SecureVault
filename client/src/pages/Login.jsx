@@ -1,22 +1,56 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
+import{
+  base64ToSalt,
+  deriveKeys
+}from '../utils/encryption';
+
+import { useVault } from '../context/VaultContext';
+
 function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
+  const { setEncryptionKey } = useVault();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     try {
+      //Request the user's salt using their email
+      const saltResponse = await fetch('http://localhost:5000/api/auth/get-salt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      const saltData = await saltResponse.json();
+
+      if(!saltResponse.ok){
+        setError(saltData.error || 'Account not found');
+        return;
+      }
+
+      //Convert the base64 salt back into bytes
+      const salt = base64ToSalt(saltData.vaultSalt);
+
+      //Derive the encryption key and authentication token
+      const keys = await deriveKeys(password, salt)
+
+      //Send authentication token to bakend
       const response = await fetch('http://localhost:5000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ 
+          email, 
+          authToken: keys.authToken
+        }),
       });
 
       const data = await response.json();
@@ -31,10 +65,16 @@ function Login() {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
+      //Keep the encryption key in react memory
+      setEncryptionKey(keys.encryptionKey);
+
       // Go to dashboard
       navigate('/dashboard');
     } catch (err) {
+      console.error('Login error:', err);
       setError('Cannot connect to server. Is the backend running?');
+    }finally{
+      setLoading(false);
     }
   };
 
@@ -74,8 +114,8 @@ function Login() {
                   />
                 </div>
 
-                <button type="submit" className="btn btn-primary w-100">
-                  Log In
+                <button type="submit" className="btn btn-primary w-100" disabled={loading}> 
+                  {loading ? 'Unlocking...' : 'Log In'}
                 </button>
               </form>
 

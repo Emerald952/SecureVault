@@ -12,7 +12,7 @@ const auth = require('../middleware/auth');
 router.get('/', auth, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM notes WHERE user_id = $1 ORDER BY updated_at DESC',
+      'SELECT id, encrypted_data, iv, created_at, updated_at FROM notes WHERE user_id = $1 ORDER BY updated_at DESC',
       [req.user.id]
     );
     res.json(result.rows);
@@ -26,15 +26,18 @@ router.get('/', auth, async (req, res) => {
 // POST /api/notes
 router.post('/', auth, async (req, res) => {
   try {
-    const { title, content } = req.body;
+    const { encrypted_data, iv } = req.body;
 
-    if (!title) {
-      return res.status(400).json({ error: 'Title is required.' });
+    if(typeof encrypted_data !== 'string' ||
+      !encrypted_data || typeof iv !== 'string' || !iv){
+        return res.status(400).json({
+          error: 'Encrypted data and Intialization vector are required'
+      });
     }
 
     const result = await pool.query(
-      'INSERT INTO notes (user_id, title, content) VALUES ($1, $2, $3) RETURNING *',
-      [req.user.id, title, content || '']
+      'INSERT INTO notes (user_id, encrypted_data, iv) VALUES ($1, $2, $3) RETURNING id, encrypted_data, iv, created_at, updated_at',
+      [req.user.id, encrypted_data, iv]
     );
 
     res.status(201).json(result.rows[0]);
@@ -48,13 +51,20 @@ router.post('/', auth, async (req, res) => {
 // PUT /api/notes/:id
 router.put('/:id', auth, async (req, res) => {
   try {
-    const { title, content } = req.body;
+    const { encrypted_data, iv } = req.body;
     const noteId = req.params.id;
+
+    if(typeof encrypted_data !== 'string' ||
+      !encrypted_data || typeof iv !== 'string' || !iv){
+        return res.status(400).json({
+          error: 'Encrypted data and Intialization vector are required'
+      });
+    }
 
     // Make sure the note belongs to this user
     const result = await pool.query(
-      'UPDATE notes SET title = $1, content = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND user_id = $4 RETURNING *',
-      [title, content || '', noteId, req.user.id]
+      'UPDATE notes SET encrypted_data = $1, iv = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND user_id = $4 RETURNING id, encrypted_data, iv, created_at, updated_at',
+      [encrypted_data, iv, noteId, req.user.id]
     );
 
     if (result.rows.length === 0) {
@@ -75,7 +85,7 @@ router.delete('/:id', auth, async (req, res) => {
     const noteId = req.params.id;
 
     const result = await pool.query(
-      'DELETE FROM notes WHERE id = $1 AND user_id = $2 RETURNING *',
+      'DELETE FROM notes WHERE id = $1 AND user_id = $2 RETURNING id',
       [noteId, req.user.id]
     );
 

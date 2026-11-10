@@ -26,6 +26,8 @@ function auth(req, res, next) {
     req.user = decoded; // { id: 1, email: 'user@example.com' }
     next(); // Continue to the actual route
   } catch (err) {
+    console.error('JWT verification error:', err.message);
+
     return res.status(401).json({ error: 'Token is invalid or expired.' });
   }
 }

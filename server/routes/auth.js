@@ -6,34 +6,52 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db');
 require('dotenv').config();
 
+//Validate Base64 Values and their decoded byte lengths
+function isValidBase64(value, expectedBytes){
+  if(typeof value !== 'string')return false;
+
+  const decoded = Buffer.from(value, 'base64');
+
+  return (
+    decoded.length === expectedBytes &&
+    decoded.toString('base64') === value 
+  );
+}
+
 // ============ SIGNUP ============
 // POST /api/auth/signup
 router.post('/signup', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, vaultSalt, authToken } = req.body;
 
-    // 1. Check if all fields are provided
-    if (!name || !email || !password) {
+    //Check if all fields are provided
+    if (!name || !email || !vaultSalt || !authToken) {
       return res.status(400).json({ error: 'All fields are required.' });
     }
 
-    // 2. Check if user already exists
+    if(!isValidBase64(vaultSalt, 16) || !isValidBase64(authToken, 32)){
+      return res.status(400).json({error: 'Invalid salt or password'});
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    //Check if user already exists
     const existingUser = await pool.query(
       'SELECT id FROM users WHERE email = $1',
-      [email]
+      [normalizedEmail]
     );
+
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ error: 'Email already registered.' });
     }
 
-    // 3. Hash the password (never store plain text passwords!)
-    const salt = await bcrypt.genSalt(10);
-    const password_hash = await bcrypt.hash(password, salt);
+    //Hash the authentication Token, not master password
+    const authTokenHash = await bcrypt.hash(authToken, 12);
 
-    // 4. Insert user into database
+    //Insert user into database
     const newUser = await pool.query(
-      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email',
-      [name, email, password_hash]
+      'INSERT INTO users (name, email, vault_salt, auth_token_hash) VALUES ($1, $2, $3, $4) RETURNING id, name, email',
+      [name.trim(), normalizedEmail, vaultSalt, authTokenHash]
     );
 
     // 5. Send back success
@@ -47,35 +65,72 @@ router.post('/signup', async (req, res) => {
   }
 });
 
+// ============ GET SALT ============
+// POST /api/auth/get-salt
+router.post('/get-salt', async(req, res) => {
+  try{
+    const {email} = req.body;
+
+    if(!email){
+      return res.status(400).json({error: 'Email required'});
+    }
+
+    const result = await pool.query(
+      'SELECT vault_salt FROM users WHERE email = $1',
+      [email.trim().toLowerCase()]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Account not found.'});
+    }
+
+    res.json({
+      vaultSalt: result.rows[0].vault_salt,
+    });
+  }catch (err){
+    console.error('Get vault salt error: ', err.message);
+    res.status(500).json({error: 'Server error.'});
+  }
+})
+
+
 // ============ LOGIN ============
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, authToken } = req.body;
 
-    // 1. Check if fields are provided
-    if (!email || !password) {
+    //Check if fields are provided
+    if (!email || !authToken) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    // 2. Find user by email
+    if (!isValidBase64(authToken, 32)) {
+      return res.status(400).json({
+        error: 'Invalid authentication token.',
+      });
+    }
+
+    //Find user by email
     const result = await pool.query(
       'SELECT * FROM users WHERE email = $1',
-      [email]
+      [email.trim().toLowerCase()]
     );
+
     if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid email or password.' });
+      return res.status(400).json({ error: 'Invalid email or password' });
     }
 
     const user = result.rows[0];
 
-    // 3. Compare password with stored hash
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+    //Verify Derived authentication token
+    const isMatch = await bcrypt.compare(authToken, user.auth_token_hash);
+
     if (!isMatch) {
-      return res.status(400).json({ error: 'Invalid email or password.' });
+      return res.status(400).json({ error: 'Invalid email or password' });
     }
 
-    // 4. Create a JWT token (valid for 24 hours)
+    //Create a JWT token (valid for 24 hours)
     const token = jwt.sign(
       { id: user.id, email: user.email }, //payload, tells the backend which user the token belongs to
       process.env.JWT_SECRET,             // secret key stored in .env, creates digital signature
