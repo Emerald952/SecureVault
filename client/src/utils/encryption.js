@@ -184,3 +184,24 @@ export async function importSharingKey(encodedKey){
         ['encrypt', 'decrypt']
     );
 }
+
+//Password Based encryption for sharing  
+export async function deriveSharingPasswordKey(password, salt){
+    const derivedBytes = await argon2id({
+        password,
+        salt,
+        parallelism: 1,
+        iterations: 3,
+        memorySize: 65536,
+        hashLength: 32,
+        outputType: 'binary',
+    });
+
+    return await crypto.subtle.importKey(
+        'raw',
+        derivedBytes,
+        { name: 'AES-GCM' },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}

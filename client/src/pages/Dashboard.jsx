@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { encryptData, decryptData, generateEncryptionKey, exportSharingKey, } from '../utils/encryption';
+import { encryptData, decryptData, generateEncryptionKey, exportSharingKey, deriveSharingPasswordKey, generateSalt, saltToBase64 } from '../utils/encryption';
 import { useVault } from '../context/VaultContext';
 
 function Dashboard() {
@@ -14,6 +14,7 @@ function Dashboard() {
   const [expiryHours, setExpiryHours] = useState(24);
   const [showShareModal, setShowShareModal] = useState(false);
   const [selectedNote, setSelectedNote] = useState(null);
+  const [sharePassword, setSharePassword] = useState('');
 
   const { encryptionKey, setEncryptionKey } = useVault();
 
@@ -215,6 +216,24 @@ function Dashboard() {
       //Export the sharing key for the URL fragment
       const encodedKey = await exportSharingKey(sharingKey);
 
+      let passwordSalt = null;
+      let encryptedSharingKey = null;
+      let keyIV = null;
+      const password = sharePassword.trim();
+
+      //Password Protected Note
+      if(password.trim()){
+        const salt = generateSalt();
+        passwordSalt = saltToBase64(salt);
+
+        const passwordKey = await deriveSharingPasswordKey(password, salt);
+
+        const encryptedKeyData = await encryptData(encodedKey, passwordKey);
+
+        encryptedSharingKey = encryptedKeyData.ciphertext;
+        keyIV = encryptedKeyData.iv;
+      }
+
       //Set link to expire after 24 hrs
       const expiresAt = new Date(
         Date.now() + expiryHours*60*60*1000
@@ -228,6 +247,9 @@ function Dashboard() {
           encryptedData: encrypted.ciphertext,
           iv: encrypted.iv,
           expiresAt,
+          passwordSalt,
+          encryptedSharingKey,
+          keyIV,
         }),
       });
 
@@ -240,17 +262,16 @@ function Dashboard() {
       await fetchShares();
 
       //Put sharing key in URL fragment
-      const shareURL = `${window.location.origin}/share/${data.share_token}#${encodedKey}`;
+      const linkKey = password ? 'protected': encodedKey;
+
+      const shareURL = `${window.location.origin}/share/${data.share_token}#${linkKey}`;
 
       //Copy the link
       await navigator.clipboard.writeText(shareURL);
 
-      alert(`Share link copied! It expires in ${expiresHours} hours`);
-
-      setShowShareModal(false);
-      setSelectedNote(null);
+      alert(`Share link copied! It expires in ${expiryHours} hours`);
     }catch(err){
-      console.err("Share error", err);
+      console.error("Share error", err);
       setError(err.message || 'Failed to create share link');
     }
   };
@@ -367,6 +388,7 @@ function Dashboard() {
                       onClick={() => {
                         setSelectedNote(note);
                         setExpiryHours(24);
+                        setSharePassword('');
                         setShowShareModal(true);
                       }}
                     >
@@ -379,7 +401,7 @@ function Dashboard() {
           ))}
         </div>
       )}
-
+      {/*View Shared Links*/}
       <div className='mt-5'>
         <h3>Shared Links</h3>
 
@@ -412,6 +434,7 @@ function Dashboard() {
         )}
       </div>
 
+      {/*Share Modal*/}
       {showShareModal && (
         <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-dialog-centered">
@@ -436,6 +459,20 @@ function Dashboard() {
                   <option value={168}>7 days</option>
                   <option value={720}>30 days</option>
                 </select>
+
+                <div className="mt-3">
+                  <label className="form-label">Sharing password (optional)</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    placeholder="Enter a password"
+                    value={sharePassword}
+                    onChange={(e) => setSharePassword(e.target.value)}
+                  />
+                  <small className="text-muted">
+                    Recipients will need this password to open the shared note.
+                  </small>
+                </div>
               </div>
 
               <div className="modal-footer">
@@ -448,7 +485,13 @@ function Dashboard() {
 
                 <button
                   className="btn btn-success"
-                  onClick={() => handleShare(selectedNote)}
+                  onClick={() => {
+                      handleShare(selectedNote),
+                      setShowShareModal(false),
+                      setSelectedNote(null),
+                      setSharePassword('')
+                    }
+                  }
                 >
                   Create Share Link
                 </button>

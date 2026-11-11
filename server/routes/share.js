@@ -8,7 +8,7 @@ const auth = require('../middleware/auth');
 // POST /api/shares
 router.post('/', auth, async(req, res) => {
     try{
-        const {noteID, encryptedData, iv, expiresAt } = req.body;
+        const {noteID, encryptedData, iv, expiresAt, passwordSalt, encryptedSharingKey, keyIV } = req.body;
 
         if(!noteID || !encryptedData || !iv || !expiresAt){
             return res.status(400).json({error: 'All fields are required'});
@@ -23,7 +23,9 @@ router.post('/', auth, async(req, res) => {
 
         //Verify that the note belongs to this user
         const note = await pool.query(
-            'SELECT id FROM notes WHERE id = $1 AND user_id = $2',
+            `SELECT id 
+             FROM notes 
+             WHERE id = $1 AND user_id = $2`,
             [noteID, req.user.id]
         );
 
@@ -35,8 +37,20 @@ router.post('/', auth, async(req, res) => {
         const shareToken = crypto.randomBytes(32).toString('hex');
 
         const result = await pool.query(
-            'INSERT INTO shared_notes(note_id, owner_id, share_token, encrypted_data, iv, expires_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, share_token, expires_at, created_at',
-            [noteID, req.user.id, shareToken, encryptedData, iv, expiry]
+            `INSERT INTO 
+                shared_notes(
+                    note_id, 
+                    owner_id, 
+                    share_token, 
+                    encrypted_data, 
+                    iv, 
+                    expires_at, 
+                    password_salt, 
+                    encrypted_sharing_key, 
+                    key_iv
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+                RETURNING id, share_token, expires_at, created_at`,
+            [noteID, req.user.id, shareToken, encryptedData, iv, expiry, passwordSalt, encryptedSharingKey, keyIV]
         );
 
         res.status(201).json(result.rows[0]);
@@ -51,7 +65,16 @@ router.post('/', auth, async(req, res) => {
 router.get('/myNotes', auth, async(req, res) => {
     try{
         const result = await pool.query(
-            'SELECT id, note_id, share_token, expires_at, is_revoked, created_at FROM shared_notes WHERE owner_id = $1 ORDER BY created_at DESC',
+            `SELECT 
+                id, 
+                note_id, 
+                share_token, 
+                expires_at, 
+                is_revoked, 
+                created_at 
+            FROM shared_notes 
+            WHERE owner_id = $1 
+            ORDER BY created_at DESC`,
             [req.user.id]
         );
 
@@ -67,7 +90,18 @@ router.get('/myNotes', auth, async(req, res) => {
 router.get('/:token', async(req, res) => {
     try {
         const result = await pool.query(
-            'SELECT encrypted_data, iv, expires_at FROM shared_notes WHERE share_token = $1 AND is_revoked = FALSE AND expires_at > CURRENT_TIMESTAMP',
+            `SELECT 
+                encrypted_data, 
+                iv, 
+                expires_at,
+                password_salt,
+                encrypted_sharing_key,
+                key_iv 
+            FROM shared_notes 
+            WHERE 
+                share_token = $1 AND 
+                is_revoked = FALSE AND 
+                expires_at > CURRENT_TIMESTAMP`,
             [req.params.token]
         );
 
@@ -87,7 +121,10 @@ router.get('/:token', async(req, res) => {
 router.delete('/:id', auth, async(req, res) => {
     try {
         const result = await pool.query(
-            'UPDATE shared_notes SET is_revoked = TRUE WHERE id = $1 AND owner_id = $2 RETURNING id',
+            `UPDATE shared_notes 
+             SET is_revoked = TRUE 
+             WHERE id = $1 AND owner_id = $2
+             RETURNING id`,
             [req.params.id, req.user.id]
         );
 
