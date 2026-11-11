@@ -8,10 +8,16 @@ const auth = require('../middleware/auth');
 // POST /api/shares
 router.post('/', auth, async(req, res) => {
     try{
-        const {noteID, encryptedData, iv, expiresAt, passwordSalt, encryptedSharingKey, keyIV } = req.body;
+        const {noteID, encryptedData, iv, expiresAt, passwordSalt, encryptedSharingKey, keyIV, ownerEncryptedKey, ownerKeyIV } = req.body;
 
         if(!noteID || !encryptedData || !iv || !expiresAt){
             return res.status(400).json({error: 'All fields are required'});
+        }
+
+        if (!ownerEncryptedKey || !ownerKeyIV) {
+            return res.status(400).json({
+                error: 'Encrypted sharing key recovery data is required'
+            });
         }
 
         //Validate Expiry Date
@@ -47,10 +53,12 @@ router.post('/', auth, async(req, res) => {
                     expires_at, 
                     password_salt, 
                     encrypted_sharing_key, 
-                    key_iv
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+                    key_iv,
+                    owner_encrypted_key,
+                    owner_key_iv
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
                 RETURNING id, share_token, expires_at, created_at`,
-            [noteID, req.user.id, shareToken, encryptedData, iv, expiry, passwordSalt, encryptedSharingKey, keyIV]
+            [noteID, req.user.id, shareToken, encryptedData, iv, expiry, passwordSalt, encryptedSharingKey, keyIV, ownerEncryptedKey, ownerKeyIV]
         );
 
         res.status(201).json(result.rows[0]);
@@ -66,14 +74,19 @@ router.get('/myNotes', auth, async(req, res) => {
     try{
         const result = await pool.query(
             `SELECT 
-                id, 
-                note_id, 
-                share_token, 
-                expires_at, 
-                is_revoked, 
-                created_at 
-            FROM shared_notes 
+                s.id, 
+                s.note_id, 
+                s.share_token, 
+                s.expires_at, 
+                s.is_revoked, 
+                s.created_at,
+                COUNT(l.id)::INTEGER AS total_views,
+                MAX(l.accessed_at) AS last_accessed
+            FROM shared_notes s
+            LEFT JOIN share_access_logs l
+                ON s.id = l.share_id
             WHERE owner_id = $1 
+            GROUP BY s.id
             ORDER BY created_at DESC`,
             [req.user.id]
         );
@@ -85,12 +98,58 @@ router.get('/myNotes', auth, async(req, res) => {
     }
 });
 
+// ============ RECOVER SHARE LINK ============
+// GET /api/shares/:id/recovery
+router.get('/:id/recovery', auth, async (req, res) => {
+    try {
+        const shareId = Number(req.params.id);
+
+        if (!Number.isInteger(shareId) || shareId <= 0) {
+            return res.status(400).json({ error: 'Invalid share ID' });
+        }
+
+        const result = await pool.query(
+            `SELECT
+                share_token,
+                owner_encrypted_key,
+                owner_key_iv,
+                password_salt
+             FROM shared_notes
+             WHERE id = $1
+                AND owner_id = $2
+                AND is_revoked = FALSE
+                AND expires_at > CURRENT_TIMESTAMP`,
+            [shareId, req.user.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                error: 'Share not found, expired or revoked'
+            });
+        }
+
+        const share = result.rows[0];
+
+        if (!share.owner_encrypted_key || !share.owner_key_iv) {
+            return res.status(400).json({
+                error: 'Recovery is unavailable for this share'
+            });
+        }
+    
+        res.json(share);
+    }catch(err){
+        console.error('Recover share error:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
 // ============ GET SHARED NOTE ============
 // GET /api/shares/:token
 router.get('/:token', async(req, res) => {
     try {
         const result = await pool.query(
             `SELECT 
+                id,
                 encrypted_data, 
                 iv, 
                 expires_at,
@@ -108,6 +167,15 @@ router.get('/:token', async(req, res) => {
         if(result.rows.length === 0){
             return res.status(400).json({error: 'Share link is invalid, expired or revoked'});
         }
+
+        await pool.query(
+            `INSERT INTO 
+             share_access_logs (share_id)
+             VALUES($1)`,
+            [result.rows[0].id]
+        );
+
+        const { id, ...sharedNote } = result.rows[0];
 
         res.json(result.rows[0]);
     }catch(err){

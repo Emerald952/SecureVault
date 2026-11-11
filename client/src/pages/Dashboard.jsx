@@ -199,6 +199,7 @@ function Dashboard() {
     navigate('/login');
   };
 
+  //Sharing Note
   const handleShare = async(note) => {
     try{
       //Generate a separate random key for shared note
@@ -215,6 +216,9 @@ function Dashboard() {
 
       //Export the sharing key for the URL fragment
       const encodedKey = await exportSharingKey(sharingKey);
+      
+      //Encrypt a recovery copy using the owner's vault key
+      const ownerEncryptedKey = await encryptData(encodedKey, encryptionKey);
 
       let passwordSalt = null;
       let encryptedSharingKey = null;
@@ -250,6 +254,8 @@ function Dashboard() {
           passwordSalt,
           encryptedSharingKey,
           keyIV,
+          ownerEncryptedKey: ownerEncryptedKey.ciphertext,
+          ownerKeyIV: ownerEncryptedKey.iv,
         }),
       });
 
@@ -296,6 +302,44 @@ function Dashboard() {
       setError(err.message);
     }
   };  
+
+  const handleCopyShare = async (share) => {
+    try{
+      const response = await apiCall(
+        `/api/shares/${share.id}/recovery`
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not recover share link');
+      }
+
+      // Decrypt the recovery key using the owner's vault key
+      const encodedKey = await decryptData(
+        {
+          ciphertext: data.owner_encrypted_key,
+          iv: data.owner_key_iv,
+        },
+        encryptionKey
+      );
+
+      // Protected shares use a marker instead of exposing the key
+      const linkKey = data.password_salt
+        ? 'protected'
+        : encodedKey;
+
+      const shareURL =
+        `${window.location.origin}/share/${data.share_token}#${linkKey}`;
+
+      await navigator.clipboard.writeText(shareURL);
+
+      alert('Existing share link copied!');
+    }catch(err) {
+      console.error('Copy share error:', err);
+      setError(err.message || 'Could not copy share link');
+    }
+  };
 
   return (
     <div className="container mt-4">
@@ -403,7 +447,17 @@ function Dashboard() {
       )}
       {/*View Shared Links*/}
       <div className='mt-5'>
-        <h3>Shared Links</h3>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+
+          <h3>Shared Links</h3>
+
+          <button
+            className="btn btn-outline-primary btn-sm"
+            onClick={fetchShares}
+          >
+            Refresh
+          </button>
+        </div>
 
         {shares.length === 0 ? (
           <p className='text-muted'>You haven't shared any notes yet</p>
@@ -414,21 +468,54 @@ function Dashboard() {
                 <div>
                   <strong>Note #{share.note_id}</strong>
                   <br/>
+
                   <small className='text-muted'>
                     Expires: {new Date(share.expires_at).toLocaleString()}
                   </small>
                   <br />
-                  <small>
-                    Status: {share.is_revoked ? 'Revoked' : 'Active'}
-                  </small>
-              </div>
 
-              {!share.is_revoked && (
-                <button className='btn btn-outline-danger btn-sm' onClick={() => handleRevoke(share.id)}>
-                    Revoke
-                </button>
-              )}
-            </div>
+                  <small>
+                    Status: {
+                      share.is_revoked 
+                        ? 'Revoked' 
+                        : new Date(share.expires_at) <= new Date() 
+                          ? 'Expired' 
+                          : 'Active'
+                    }
+                  </small>
+                  <br />
+
+                  <small>
+                    Views: {share.total_views}
+                  </small>
+                  <br />
+
+                  <small className='text-muted'>
+                    Last accessed: {
+                      share.last_accessed
+                        ? new Date(share.last_accessed).toLocaleString()
+                        : 'Never'
+                    }
+                  </small>
+                </div>
+
+                {!share.is_revoked && new Date(share.expires_at) > new Date() && (
+                    <div className="d-flex gap-2">
+                      <button
+                        className="btn btn-outline-primary btn-sm"
+                        onClick={() => handleCopyShare(share)}
+                      >
+                        Copy Link
+                      </button>
+                      <button 
+                        className='btn btn-outline-danger btn-sm' 
+                        onClick={() => handleRevoke(share.id)}
+                      >
+                          Revoke
+                      </button>
+                    </div>
+                )}
+              </div>
             ))}
           </div>
         )}

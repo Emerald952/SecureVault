@@ -4,6 +4,7 @@ import { decryptData, importSharingKey, deriveSharingPasswordKey, base64ToSalt }
 
 function SharedNote(){
     const { token } = useParams();
+    const hasLoadedRef = useRef(false);
     const sharingKeyRef = useRef(
         window.location.hash.slice(1) ||
         sessionStorage.getItem(`share-key-${window.location.pathname.split('/').pop()}`)
@@ -60,6 +61,11 @@ function SharedNote(){
     }
 
     useEffect(() => {
+        //Prevent duplicates in StrictMode
+        if(hasLoadedRef.current)return;
+
+        hasLoadedRef.current = true;
+
         const loadSharedNote = async() => {
             try{
                 //Read the sharing key from the URL fragment
