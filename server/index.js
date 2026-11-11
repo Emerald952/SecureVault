@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const notesRoutes = require('./routes/notes');
+const sharesRoutes = require('./routes/share');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,6 +19,7 @@ app.use(express.json());
 // ---- ROUTES ----
 app.use('/api/auth', authRoutes);   // /api/auth/signup, /api/auth/login
 app.use('/api/notes', notesRoutes); // /api/notes (GET, POST, PUT, DELETE)
+app.use('/api/shares', sharesRoutes);
 
 // ---- TEST ROUTE ----
 app.get('/', (req, res) => {

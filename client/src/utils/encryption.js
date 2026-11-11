@@ -161,3 +161,26 @@ function base64ToArrayBuffer(base64){
 
     return bytes.buffer;
 }
+
+// SHARING UTILITIES:
+
+//Export a sharing key as Base64 so it can be placed in a URL fragment
+export async function exportSharingKey(key){
+    const rawKey = await crypto.subtle.exportKey('raw', key);
+    return arrayBufferToBase64(rawKey);
+}
+
+//Import a sharing key received from a URL fragment
+export async function importSharingKey(encodedKey){
+    const rawKey = base64ToArrayBuffer(encodedKey);
+
+    return await crypto.subtle.importKey(
+        'raw',
+        rawKey,
+        {
+            name: 'AES-GCM',
+        },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}

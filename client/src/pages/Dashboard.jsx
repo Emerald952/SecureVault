@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { encryptData, decryptData} from '../utils/encryption';
+import { encryptData, decryptData, generateEncryptionKey, exportSharingKey, } from '../utils/encryption';
 import { useVault } from '../context/VaultContext';
 
 function Dashboard() {
@@ -10,7 +10,11 @@ function Dashboard() {
   const [content, setContent] = useState('');      // New/edit note content
   const [editingId, setEditingId] = useState(null); // Which note is being edited (null = creating new)
   const [error, setError] = useState('');
-  
+  const [shares, setShares] = useState([]);
+  const [expiryHours, setExpiryHours] = useState(24);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [selectedNote, setSelectedNote] = useState(null);
+
   const { encryptionKey, setEncryptionKey } = useVault();
 
   const navigate = useNavigate();
@@ -36,6 +40,7 @@ function Dashboard() {
   // useEffect with [] runs once when the component first appears
   useEffect(() => {
     fetchNotes();
+    fetchShares();
   }, []);
 
   const fetchNotes = async () => {
@@ -79,6 +84,23 @@ function Dashboard() {
     } catch (err) {
       console.error('Fetch notes error:', err);
       setError('Failed to load notes. Is the server running?');
+    }
+  };
+
+  //Fetch Shared Notes
+  const fetchShares = async () => {
+    try{
+      const response = await apiCall('/api/shares/myNotes');
+      const data = await response.json();
+
+      if(!response.ok){
+        throw new Error(data.error || 'Could not fetch shares');
+      }
+
+      setShares(data);
+    }catch(err){
+      console.error('Fetch shares error: ', err);
+      setError(err.message);
     }
   };
 
@@ -176,6 +198,84 @@ function Dashboard() {
     navigate('/login');
   };
 
+  const handleShare = async(note) => {
+    try{
+      //Generate a separate random key for shared note
+      const sharingKey = await generateEncryptionKey();
+
+      //Prepare the decrypted note data
+      const noteData = JSON.stringify({
+        title: note.title,
+        content: note.content,
+      });
+
+      //Encrypt the note using the separate sharing key
+      const encrypted = await encryptData(noteData, sharingKey);
+
+      //Export the sharing key for the URL fragment
+      const encodedKey = await exportSharingKey(sharingKey);
+
+      //Set link to expire after 24 hrs
+      const expiresAt = new Date(
+        Date.now() + expiryHours*60*60*1000
+      ).toISOString();
+
+      //Create the share on backend
+      const response = await apiCall('/api/shares', {
+        method: 'POST', 
+        body: JSON.stringify({
+          noteID: note.id,
+          encryptedData: encrypted.ciphertext,
+          iv: encrypted.iv,
+          expiresAt,
+        }),
+      });
+
+      const data = await response.json();
+
+      if(!response.ok){
+        throw new Error(data.error || 'Could not create share');
+      }
+
+      await fetchShares();
+
+      //Put sharing key in URL fragment
+      const shareURL = `${window.location.origin}/share/${data.share_token}#${encodedKey}`;
+
+      //Copy the link
+      await navigator.clipboard.writeText(shareURL);
+
+      alert(`Share link copied! It expires in ${expiresHours} hours`);
+
+      setShowShareModal(false);
+      setSelectedNote(null);
+    }catch(err){
+      console.err("Share error", err);
+      setError(err.message || 'Failed to create share link');
+    }
+  };
+
+  const handleRevoke = async (shareID) => {
+    try{
+      const response = await apiCall(`/api/shares/${shareID}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if(!response.ok){
+        throw new Error(data.error || 'Could not revoke share');
+      }
+
+      //Refresh the list after revoking
+      fetchShares();
+      alert('Share link revoked successfully!');
+    }catch(err){
+      console.error('Revoke share error: ', err);
+      setError(err.message);
+    }
+  };  
+
   return (
     <div className="container mt-4">
       {/* Navbar */}
@@ -262,11 +362,99 @@ function Dashboard() {
                     >
                       Delete
                     </button>
+                    <button
+                      className="btn btn-outline-success btn-sm-me-1"
+                      onClick={() => {
+                        setSelectedNote(note);
+                        setExpiryHours(24);
+                        setShowShareModal(true);
+                      }}
+                    >
+                      Share
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      <div className='mt-5'>
+        <h3>Shared Links</h3>
+
+        {shares.length === 0 ? (
+          <p className='text-muted'>You haven't shared any notes yet</p>
+        ): (
+          <div className='list-group'>
+            {shares.map((share) => (
+              <div key={share.id} className='list-group-item d-flex justify-content-between align-items-center'>
+                <div>
+                  <strong>Note #{share.note_id}</strong>
+                  <br/>
+                  <small className='text-muted'>
+                    Expires: {new Date(share.expires_at).toLocaleString()}
+                  </small>
+                  <br />
+                  <small>
+                    Status: {share.is_revoked ? 'Revoked' : 'Active'}
+                  </small>
+              </div>
+
+              {!share.is_revoked && (
+                <button className='btn btn-outline-danger btn-sm' onClick={() => handleRevoke(share.id)}>
+                    Revoke
+                </button>
+              )}
+            </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showShareModal && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Share Note</h5>
+                  <button type="button" className="btn-close"
+                    onClick={() => setShowShareModal(false)}
+                  />
+              </div>
+              <div className="modal-body">
+                <p>Choose how long this share link should remain active.</p>
+
+                <label className="form-label">Link expiry</label>
+                <select
+                  className="form-select"
+                  value={expiryHours}
+                  onChange={(e) => setExpiryHours(Number(e.target.value))}
+                >
+                  <option value={1}>1 hour</option>
+                  <option value={24}>24 hours</option>
+                  <option value={168}>7 days</option>
+                  <option value={720}>30 days</option>
+                </select>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowShareModal(false)}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  className="btn btn-success"
+                  onClick={() => handleShare(selectedNote)}
+                >
+                  Create Share Link
+                </button>
+              </div>
+            </div>
+          </div> 
         </div>
       )}
     </div>

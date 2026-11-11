@@ -1,10 +1,11 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+
 import Signup from './pages/Signup.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
-
 import { VaultProvider, useVault } from './context/VaultContext.jsx';
+import SharedNote from './pages/SharedNote.jsx';
 
 // PrivateRoute: If user has a token, show the page. Otherwise redirect to login.
 function PrivateRoute({ children }) {
@@ -22,7 +23,8 @@ function App() {
           {/* Public routes - anyone can access */}
           <Route path="/signup" element={<Signup />} />
           <Route path="/login" element={<Login />} />
-
+          <Route path = "share/:token" element={<SharedNote/>} />
+          
           {/* Protected route - must be logged in */}
           <Route
             path="/dashboard"
