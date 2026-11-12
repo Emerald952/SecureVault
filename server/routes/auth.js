@@ -4,6 +4,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
+const { loginLimiter, saltLimiter, signupLimiter} = require('../middleware/rateLimiters');
 require('dotenv').config();
 
 //Validate Base64 Values and their decoded byte lengths
@@ -20,13 +21,31 @@ function isValidBase64(value, expectedBytes){
 
 // ============ SIGNUP ============
 // POST /api/auth/signup
-router.post('/signup', async (req, res) => {
+router.post('/signup', signupLimiter, async (req, res) => {
   try {
     const { name, email, vaultSalt, authToken } = req.body;
 
     //Check if all fields are provided
-    if (!name || !email || !vaultSalt || !authToken) {
+    if (typeof name !== 'string' || !name.trim() ||
+        typeof email !== 'string' || !email.trim() ||
+        typeof vaultSalt !== 'string' ||
+        typeof authToken !== 'string') {
       return res.status(400).json({ error: 'All fields are required.' });
+    }
+
+    //Validate email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(email.trim())) {
+      return res.status(400).json({
+        error: 'Please provide a valid email address.'
+      });
+    }
+
+    if (name.trim().length > 100 || email.trim().length > 254) {
+      return res.status(400).json({
+        error: 'Name or email is too long.'
+      });
     }
 
     if(!isValidBase64(vaultSalt, 16) || !isValidBase64(authToken, 32)){
@@ -67,17 +86,28 @@ router.post('/signup', async (req, res) => {
 
 // ============ GET SALT ============
 // POST /api/auth/get-salt
-router.post('/get-salt', async(req, res) => {
+router.post('/get-salt', saltLimiter, async(req, res) => {
   try{
     const {email} = req.body;
 
-    if(!email){
-      return res.status(400).json({error: 'Email required'});
+    if(typeof email !== 'string' || !email.trim()){
+      return res.status(400).json({error: ' Valid Email required'});
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if ( normalizedEmail.length > 254 || !emailRegex.test(normalizedEmail)){
+      return res.status(400).json({
+        error: 'Invalid email format.'
+      });
     }
 
     const result = await pool.query(
-      'SELECT vault_salt FROM users WHERE email = $1',
-      [email.trim().toLowerCase()]
+      `SELECT 
+        vault_salt
+       FROM users 
+       WHERE email = $1`,
+      [normalizedEmail]
     );
 
     if (result.rows.length === 0) {
@@ -96,13 +126,22 @@ router.post('/get-salt', async(req, res) => {
 
 // ============ LOGIN ============
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, authToken } = req.body;
 
     //Check if fields are provided
-    if (!email || !authToken) {
+    if(typeof email !== 'string' || !email.trim() ||
+      typeof authToken !== 'string' || !authToken) {
       return res.status(400).json({ error: 'Email and password are required.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if ( normalizedEmail.length > 254 || !emailRegex.test(normalizedEmail)){
+      return res.status(400).json({
+        error: 'Invalid email format.'
+      });
     }
 
     if (!isValidBase64(authToken, 32)) {
@@ -113,8 +152,14 @@ router.post('/login', async (req, res) => {
 
     //Find user by email
     const result = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
-      [email.trim().toLowerCase()]
+      `SELECT 
+        id,
+        name,
+        email,
+        auth_token_hash
+       FROM users 
+       WHERE email = $1`,
+      [normalizedEmail]
     );
 
     if (result.rows.length === 0) {

@@ -3,6 +3,15 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
+if (
+  !process.env.JWT_SECRET ||
+  Buffer.byteLength(process.env.JWT_SECRET, 'utf8') < 32
+) {
+  throw new Error(
+    'JWT_SECRET is missing or too weak. Use a random secret of at least 32 bytes.'
+  );
+}
+
 const authRoutes = require('./routes/auth');
 const notesRoutes = require('./routes/notes');
 const sharesRoutes = require('./routes/share');

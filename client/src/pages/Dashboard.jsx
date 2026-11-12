@@ -15,6 +15,8 @@ function Dashboard() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [selectedNote, setSelectedNote] = useState(null);
   const [sharePassword, setSharePassword] = useState('');
+  const [activeSection, setActiveSection] = useState('notes');
+  const [showEditor, setShowEditor] = useState(false);
 
   const { encryptionKey, setEncryptionKey } = useVault();
 
@@ -151,6 +153,7 @@ function Dashboard() {
       setTitle('');
       setContent('');
       setEditingId(null);
+      setShowEditor(false);
 
       await fetchNotes();
     } catch (err) {
@@ -164,8 +167,7 @@ function Dashboard() {
     setTitle(note.title);
     setContent(note.content);
     setEditingId(note.id);
-    // Scroll to top so user sees the form
-    window.scrollTo(0, 0);
+    setShowEditor(true);
   };
 
   // Cancel editing clear the form
@@ -173,6 +175,7 @@ function Dashboard() {
     setTitle('');
     setContent('');
     setEditingId(null);
+    setShowEditor(false);
   };
 
   // Delete a note
@@ -334,7 +337,7 @@ function Dashboard() {
 
       await navigator.clipboard.writeText(shareURL);
 
-      alert('Existing share link copied!');
+      alert('Share link copied!');
     }catch(err) {
       console.error('Copy share error:', err);
       setError(err.message || 'Could not copy share link');
@@ -342,251 +345,397 @@ function Dashboard() {
   };
 
   return (
-    <div className="container mt-4">
-      {/* Navbar */}
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h3>SecureVault</h3>
-        <div>
-          <span className="me-3 text-muted">Welcome, {user.name || 'User'}</span>
-          <button className="btn btn-outline-danger btn-sm" onClick={handleLogout}>
+    <div>
+      {/* Top Navbar */}
+      <nav className="navbar bg-white border-bottom px-4 py-3">
+        <h3 className="mb-2">SecureVault</h3>
+
+        <span className="text-muted">
+          Welcome! <strong>{user.name || 'User'}</strong>
+        </span>
+      </nav>
+
+      {/* Main Layout */}
+      <div className="d-flex" style={{ minHeight: '85vh' }}>
+
+        {/* Sidebar */}
+        <aside
+          className="sidebar-nav mt-2 bg-white border-end p-3 d-flex flex-column"
+          style={{ width: '230px', flexShrink: 0, position: 'fixed', top: '73px', bottom:0, left:0, zIndex: 100}}
+        >
+          <div className="d-flex flex-column gap-2">
+            <button
+              className={`btn text-start ${activeSection === 'notes' ? 'btn-primary' : 'btn-light'}`}
+              onClick={() => setActiveSection('notes')}
+              >
+              <i className="bi bi-journal-text me-2"></i>
+              Notes
+            </button>
+
+            <button
+              className={`btn text-start ${activeSection === 'files' ? 'btn-primary' : 'btn-light'}`}
+              onClick={() => setActiveSection('files')}
+            >
+              <i className="bi bi-folder2 me-2"></i>
+              Files
+            </button>
+            <button
+              className={`btn text-start ${activeSection === 'shared' ? 'btn-primary' : 'btn-light'}`}
+              onClick={() => setActiveSection('shared')}
+            >
+              <i className="bi bi-share me-2"></i>
+              Shared Links
+            </button>
+            <hr />
+          </div>
+          <button
+            className="btn btn-outline-danger text-start mt-auto"
+            onClick={handleLogout}
+          >
+            <i className="bi bi-box-arrow-right me-2"></i>
             Logout
           </button>
-        </div>
-      </div>
+        </aside>
+        {/* Main Content */}
+        <main className="main-content flex-grow-1 p-4" style={{ marginLeft: '230px'}}>
+          {error && <div className="alert alert-danger">{error}</div>}
+          
+          {activeSection === 'notes' && (
+            <>
+            {!showEditor && (
+              <div>
 
-      {error && <div className="alert alert-danger">{error}</div>}
+                {/*Note List*/}
+                <h4 className="mb-4">Your Notes ({notes.length})</h4>
 
-      {/* Note Form: Create or Edit */}
-      <div className="card shadow-sm mb-4">
-        <div className="card-body">
-          <h5>{editingId ? 'Edit Note' : 'Add New Note'}</h5>
-          <form onSubmit={handleSubmit}>
-            <div className="mb-3">
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Note title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                required
-              />
-            </div>
-            <div className="mb-3">
-              <textarea
-                className="form-control"
-                placeholder="Write your note here..."
-                rows="3"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-              />
-            </div>
-            <button type="submit" className="btn btn-primary me-2">
-              {editingId ? 'Update Note' : 'Add Note'}
-            </button>
-            {editingId && (
-              <button type="button" className="btn btn-secondary" onClick={handleCancel}>
-                Cancel
-              </button>
+                {notes.length === 0 ? (
+                  <div className="text-center py-5">
+                    <i className="bi bi-journal-plus text-muted" style={{ fontSize: '3rem' }}></i>
+                    <h5 className="mt-3">No notes yet</h5>
+                    <p className="text-muted">
+                      Start by creating your first secure note.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border-top">
+                    {notes.map((note) => (
+                      <button
+                        key={note.id}
+                        type="button"
+                        className="note-row w-100 d-flex justify-content-between align-items-center
+                                  bg-white border-0 border-bottom px-3 py-3 text-start"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => handleEdit(note)}
+                      >
+                        <div className="d-flex flex-column">
+                          <strong>{note.title || 'Untitled Note'}</strong>
+                          <small className="text-muted mt-1">
+                            {note.content
+                              ? note.content.slice(0, 100) + (note.content.length > 100 ? '...' : '')
+                              : 'No content'}
+                          </small>
+                        </div>
+                        
+                        <small className="text-muted">
+                          {new Date(note.updated_at).toLocaleDateString()}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  className="btn btn-primary rounded-circle position-fixed"
+                  style={{ bottom: '35px', right: '35px', width: '60px', height: '60px', fontSize: '28px' }}
+                  onClick={() => {
+                    handleCancel();
+                    setShowEditor(true);
+                  }}
+                >
+                  +
+                </button>
+              </div>
             )}
-          </form>
-        </div>
-      </div>
 
-      {/* Notes List */}
-      <h5 className="mb-3">Your Notes ({notes.length})</h5>
+            {showEditor && (
+              <>
+              {/* Note Editor*/}
+              <div>
+                <div className="d-flex justify-content-between align-items-center mb-4">
+                  <button
+                    className="btn btn-outline-secondary"
+                    onClick={handleCancel}
+                  >
+                    <i className="bi bi-arrow-left me-2"></i>
+                    Back to Notes
+                  </button>
 
-      {notes.length === 0 ? (
-        <div className="text-center text-muted py-5">
-          <p>No notes yet. Create your first note above!</p>
-        </div>
-      ) : (
-        <div className="row">
-          {notes.map((note) => (
-            <div key={note.id} className="col-md-6 col-lg-4 mb-3">
-              <div className="card h-100 shadow-sm">
-                <div className="card-body">
-                  <h6 className="card-title">{note.title}</h6>
-                  <p className="card-text text-muted" style={{ whiteSpace: 'pre-wrap' }}>
-                    {note.content || '(No content)'}
-                  </p>
+                  <div className="d-flex gap-2">
+                    {editingId && (
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger"
+                        onClick={async () => {
+                          await handleDelete(editingId);
+                          setTitle('');
+                          setContent('');
+                          setEditingId(null);
+                          setShowEditor(false);
+                        }}
+                      >
+                        <i className="bi bi-trash me-2"></i>
+                        Delete
+                      </button>
+                    )}
+
+                    {editingId && (
+                      <button
+                        type="button"
+                        className="btn btn-outline-primary"
+                        onClick={() => {
+                          setSelectedNote({
+                            id: editingId,
+                            title,
+                            content
+                          });
+                          setExpiryHours(24);
+                          setSharePassword('');
+                          setShowShareModal(true);
+                        }}
+                      >
+                        <i className="bi bi-share me-2"></i>
+                        Share
+                      </button>
+                    )}
+                    
+                    <button
+                      type="submit"
+                      form="note-form"
+                      className="btn btn-success"
+                    >
+                      <i className="bi bi-save me-2"></i>
+                      Save
+                    </button>
+                  </div>
+
+                  
                 </div>
-                <div className="card-footer bg-white d-flex justify-content-between align-items-center">
-                  <small className="text-muted">
-                    {new Date(note.updated_at).toLocaleDateString()}
-                  </small>
-                  <div>
-                    <button
-                      className="btn btn-outline-primary btn-sm me-1"
-                      onClick={() => handleEdit(note)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="btn btn-outline-danger btn-sm"
-                      onClick={() => handleDelete(note.id)}
-                    >
-                      Delete
-                    </button>
-                    <button
-                      className="btn btn-outline-success btn-sm-me-1"
-                      onClick={() => {
-                        setSelectedNote(note);
-                        setExpiryHours(24);
-                        setSharePassword('');
-                        setShowShareModal(true);
-                      }}
-                    >
-                      Share
-                    </button>
+                <div className="card shadow-sm rounded-3" style={{ minHeight: 'calc(100vh - 260px)' }}>
+                  <div className="card-body">
+                    <form id="note-form" onSubmit={handleSubmit}>
+                      <div className="mb-3">
+                        <input
+                          type="text"
+                          className="note-title form-control form-control-lg border-0 border-bottom rounded-0 shadow-none"
+                          placeholder="Untitled Note"
+                          value={title}
+                          onChange={(e) => setTitle(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="mb-3">
+                        <textarea
+                          className="note-content form-control border-0 shadow-none"
+                          placeholder="Write your note here..."
+                          rows="11"
+                          style={{ minHeight: 'calc(100vh - 380px)', resize: 'none' }}
+                          value={content}
+                          onChange={(e) => setContent(e.target.value)}
+                        />
+                      </div>
+                    </form>
                   </div>
                 </div>
               </div>
+              </>
+            )}        
+            </>
+          )}
+
+          {/* Files Section */}
+          {activeSection === 'files' && (
+            <div className="mt-2">
+              <div className="d-flex justify-content-between align-items-center mb-4">
+                <h4>My Files</h4>
+
+                <button className="btn btn-primary btn-sm" disabled>
+                  <i className="bi bi-upload me-2"></i>
+                  Upload File
+                </button>
+              </div>
+
+              <div className="text-center py-5">
+                <i
+                  className="bi bi-folder2-open text-muted"
+                  style={{ fontSize: '3rem' }}
+                ></i>
+
+                <h5 className="mt-3">No files yet</h5>
+
+                <p className="text-muted">
+                  Your encrypted files will appear here.
+                </p>
+              </div>
             </div>
-          ))}
-        </div>
-      )}
-      {/*View Shared Links*/}
-      <div className='mt-5'>
-        <div className="d-flex justify-content-between align-items-center mb-3">
+          )}
 
-          <h3>Shared Links</h3>
+          {activeSection === 'shared' && (
+            <>
+            {/*View Shared Links*/}
+            <div className='mt-2'>
+              <div className="d-flex justify-content-between align-items-center mb-4">
+                <h4 > Shared Links</h4>
+                <button
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={fetchShares}
+                >
+                  Refresh
+                </button>
+              </div>
 
-          <button
-            className="btn btn-outline-primary btn-sm"
-            onClick={fetchShares}
-          >
-            Refresh
-          </button>
-        </div>
+              {shares.length === 0 ? (
+                <div className="text-center py-5">
+                    <i className="bi bi-journal-plus text-muted" style={{ fontSize: '3rem' }}></i>
+                    <h5 className="mt-3">You haven't shared any notes yet</h5>
+                  </div>
+              ): (
+                <div className="border-top">
+                  {shares.map((share) => {
+                    const isExpired = new Date(share.expires_at) <= new Date();
+                    const isActive = !share.is_revoked && !isExpired;
+                      
+                    return (
+                      <div key={share.id}
+                       className='list-group-item d-flex justify-content-between align-items-center border-bottom py-2 px-3'
+                      >
+                        <div>
+                          <p className='fw-semibold'>
+                            {notes.find(note => note.id === share.note_id)?.title || 'Untitled Note'}
+                          </p>
 
-        {shares.length === 0 ? (
-          <p className='text-muted'>You haven't shared any notes yet</p>
-        ): (
-          <div className='list-group'>
-            {shares.map((share) => (
-              <div key={share.id} className='list-group-item d-flex justify-content-between align-items-center'>
-                <div>
-                  <strong>Note #{share.note_id}</strong>
-                  <br/>
+                          <div className='small text-muted mt-1'>
+                            Expires: {new Date(share.expires_at).toLocaleString()}
+                          </div>
 
-                  <small className='text-muted'>
-                    Expires: {new Date(share.expires_at).toLocaleString()}
-                  </small>
-                  <br />
+                          <div className="small mt-1">
+                            Status: {' '} 
+                            <span className = {`badge ${
+                              isActive 
+                                ? 'bg-success'
+                                : share.is_revoked
+                                  ? 'bg-danger'
+                                  : 'bg-secondary'
+                            }`}>
+                              {share.is_revoked 
+                                ? 'Revoked' 
+                                : isExpired 
+                                  ? 'Expired' 
+                                  : 'Active'
+                              }
+                            </span>
+                          </div>
+                    
+                          <div className="small text-muted mt-1">
+                            Views: {share.total_views} · Last accessed:{' '}
+                            {share.last_accessed
+                              ? new Date(share.last_accessed).toLocaleString()
+                              : 'Never'}
+                          </div>
+                        </div>
+                        {isActive && (
+                          <div className="d-flex gap-2">
+                            <button
+                              className="btn btn-outline-primary btn-sm"
+                              onClick={() => handleCopyShare(share)}
+                            >
+                              Copy Link
+                            </button>
 
-                  <small>
-                    Status: {
-                      share.is_revoked 
-                        ? 'Revoked' 
-                        : new Date(share.expires_at) <= new Date() 
-                          ? 'Expired' 
-                          : 'Active'
-                    }
-                  </small>
-                  <br />
-
-                  <small>
-                    Views: {share.total_views}
-                  </small>
-                  <br />
-
-                  <small className='text-muted'>
-                    Last accessed: {
-                      share.last_accessed
-                        ? new Date(share.last_accessed).toLocaleString()
-                        : 'Never'
-                    }
-                  </small>
+                            <button
+                              className="btn btn-outline-danger btn-sm"
+                              onClick={() => handleRevoke(share.id)}
+                            >
+                              Revoke
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
+              )}
+            </div>
+            </>
+          )}
 
-                {!share.is_revoked && new Date(share.expires_at) > new Date() && (
-                    <div className="d-flex gap-2">
-                      <button
-                        className="btn btn-outline-primary btn-sm"
-                        onClick={() => handleCopyShare(share)}
-                      >
-                        Copy Link
-                      </button>
-                      <button 
-                        className='btn btn-outline-danger btn-sm' 
-                        onClick={() => handleRevoke(share.id)}
-                      >
-                          Revoke
-                      </button>
+          {/*Share Modal*/}
+          {showShareModal && (
+            <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+              <div className="modal-dialog modal-dialog-centered">
+                <div className="modal-content">
+                  <div className="modal-header">
+                    <h5 className="modal-title">Share Note</h5>
+                      <button type="button" className="btn-close"
+                        onClick={() => setShowShareModal(false)}
+                      />
+                  </div>
+                  <div className="modal-body">
+                    <p>Choose how long this share link should remain active.</p>
+
+                    <label className="form-label">Link expiry</label>
+                    <select
+                      className="form-select"
+                      value={expiryHours}
+                      onChange={(e) => setExpiryHours(Number(e.target.value))}
+                    >
+                      <option value={1}>1 hour</option>
+                      <option value={24}>24 hours</option>
+                      <option value={168}>7 days</option>
+                      <option value={720}>30 days</option>
+                    </select>
+
+                    <div className="mt-3">
+                      <label className="form-label">Sharing password (optional)</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Enter a password"
+                        value={sharePassword}
+                        onChange={(e) => setSharePassword(e.target.value)}
+                      />
+                      <small className="text-muted">
+                        Recipients will need this password to open the shared note.
+                      </small>
                     </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                  </div>
 
-      {/*Share Modal*/}
-      {showShareModal && (
-        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-dialog-centered">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Share Note</h5>
-                  <button type="button" className="btn-close"
-                    onClick={() => setShowShareModal(false)}
-                  />
-              </div>
-              <div className="modal-body">
-                <p>Choose how long this share link should remain active.</p>
+                  <div className="modal-footer">
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => setShowShareModal(false)}
+                    >
+                      Cancel
+                    </button>
 
-                <label className="form-label">Link expiry</label>
-                <select
-                  className="form-select"
-                  value={expiryHours}
-                  onChange={(e) => setExpiryHours(Number(e.target.value))}
-                >
-                  <option value={1}>1 hour</option>
-                  <option value={24}>24 hours</option>
-                  <option value={168}>7 days</option>
-                  <option value={720}>30 days</option>
-                </select>
-
-                <div className="mt-3">
-                  <label className="form-label">Sharing password (optional)</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="Enter a password"
-                    value={sharePassword}
-                    onChange={(e) => setSharePassword(e.target.value)}
-                  />
-                  <small className="text-muted">
-                    Recipients will need this password to open the shared note.
-                  </small>
+                    <button
+                      className="btn btn-success"
+                      onClick={() => {
+                          handleShare(selectedNote),
+                          setShowShareModal(false),
+                          setSelectedNote(null),
+                          setSharePassword('')
+                        }
+                      }
+                    >
+                      Create Share Link
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setShowShareModal(false)}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  className="btn btn-success"
-                  onClick={() => {
-                      handleShare(selectedNote),
-                      setShowShareModal(false),
-                      setSelectedNote(null),
-                      setSharePassword('')
-                    }
-                  }
-                >
-                  Create Share Link
-                </button>
-              </div>
+              </div> 
             </div>
-          </div> 
-        </div>
-      )}
+          )}
+        </main>
+      </div>
     </div>
   );
 }
